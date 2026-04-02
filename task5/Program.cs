@@ -17,6 +17,20 @@ namespace LightHTMLDemo
         WithClosingTag
     }
 
+    public class LightEvent
+    {
+        public string Type { get; }
+        public LightElementNode Target { get; }
+        public object? Data { get; }
+
+        public LightEvent(string type, LightElementNode target, object? data = null)
+        {
+            Type = type;
+            Target = target;
+            Data = data;
+        }
+    }
+
     public abstract class LightNode
     {
         public abstract string OuterHTML();
@@ -54,6 +68,9 @@ namespace LightHTMLDemo
         private readonly List<LightNode> _children = new List<LightNode>();
         private readonly List<string> _cssClasses = new List<string>();
 
+        private readonly Dictionary<string, List<Action<LightEvent>>> _eventListeners
+            = new Dictionary<string, List<Action<LightEvent>>>(StringComparer.OrdinalIgnoreCase);
+
         public string TagName { get; }
         public DisplayType DisplayType { get; }
         public ClosingType ClosingType { get; }
@@ -78,6 +95,58 @@ namespace LightHTMLDemo
             if (!string.IsNullOrWhiteSpace(className))
             {
                 _cssClasses.Add(className);
+            }
+        }
+
+        public void AddEventListener(string eventName, Action<LightEvent> handler)
+        {
+            if (string.IsNullOrWhiteSpace(eventName) || handler == null) return;
+
+            if (!_eventListeners.TryGetValue(eventName, out var list))
+            {
+                list = new List<Action<LightEvent>>();
+                _eventListeners[eventName] = list;
+            }
+
+            list.Add(handler);
+        }
+
+        public bool RemoveEventListener(string eventName, Action<LightEvent> handler)
+        {
+            if (string.IsNullOrWhiteSpace(eventName) || handler == null) return false;
+
+            if (_eventListeners.TryGetValue(eventName, out var list))
+            {
+                var removed = list.Remove(handler);
+                if (list.Count == 0)
+                {
+                    _eventListeners.Remove(eventName);
+                }
+                return removed;
+            }
+            return false;
+        }
+
+        public void DispatchEvent(string eventName, object? data = null)
+        {
+            if (string.IsNullOrWhiteSpace(eventName)) return;
+
+            var evt = new LightEvent(eventName, this, data);
+
+            if (_eventListeners.TryGetValue(eventName, out var list))
+            {
+                var handlers = list.ToArray();
+                foreach (var h in handlers)
+                {
+                    try
+                    {
+                        h.Invoke(evt);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Event handler error] {ex.Message}");
+                    }
+                }
             }
         }
 
@@ -143,6 +212,7 @@ namespace LightHTMLDemo
             Console.WriteLine($"Children count: {ChildrenCount}");
             Console.WriteLine($"InnerHTML: {InnerHTML()}");
             Console.WriteLine($"OuterHTML: {OuterHTML()}");
+            Console.WriteLine($"Registered events: {(_eventListeners.Count > 0 ? string.Join(", ", _eventListeners.Keys) : "none")}");
         }
     }
 
@@ -150,6 +220,9 @@ namespace LightHTMLDemo
     {
         static void Main(string[] args)
         {
+            Console.OutputEncoding = Encoding.UTF8;
+            Console.InputEncoding = Encoding.UTF8;
+
             var page = new LightElementNode("div", DisplayType.Block, ClosingType.WithClosingTag);
             page.AddCssClass("container");
 
@@ -179,6 +252,26 @@ namespace LightHTMLDemo
             page.AddChild(list);
             page.AddChild(image);
 
+            item1.AddEventListener("click", evt =>
+            {
+                Console.WriteLine($"[Event] '{evt.Type}' на елементі <{evt.Target.TagName}> з текстом: '{evt.Target.InnerHTML()}'");
+            });
+
+            item2.AddEventListener("click", evt =>
+            {
+                Console.WriteLine($"[Event] '{evt.Type}' на <{evt.Target.TagName}> — відкриваємо сторінку 'About'.");
+            });
+
+            list.AddEventListener("mouseover", evt =>
+            {
+                Console.WriteLine($"[Event] '{evt.Type}' на <{evt.Target.TagName}> — підсвічуємо меню.");
+            });
+
+            image.AddEventListener("click", evt =>
+            {
+                Console.WriteLine($"[Event] '{evt.Type}' на <{evt.Target.TagName}> — логотип натиснуто. Дані: {evt.Data ?? "none"}");
+            });
+
             Console.WriteLine("=== Tree output ===");
             page.Print();
 
@@ -189,6 +282,26 @@ namespace LightHTMLDemo
             Console.WriteLine();
             Console.WriteLine("=== Full OuterHTML ===");
             Console.WriteLine(page.OuterHTML());
+
+            Console.WriteLine();
+            Console.WriteLine("=== Симуляція подій ===");
+
+            Console.WriteLine("-- Клік по першому пункту меню --");
+            item1.DispatchEvent("click");
+
+            Console.WriteLine();
+
+            Console.WriteLine("-- Mouseover на списку --");
+            list.DispatchEvent("mouseover");
+
+            Console.WriteLine();
+
+            Console.WriteLine("-- Клік по логотипу з додатковими даними --");
+            image.DispatchEvent("click", new { href = "/", timestamp = DateTime.UtcNow });
+
+            Console.WriteLine();
+
+            Console.WriteLine("=== Кінець демонстрації подій ===");
         }
     }
 }
