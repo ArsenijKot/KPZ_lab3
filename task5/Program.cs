@@ -78,6 +78,9 @@ namespace LightHTMLDemo
 
         public IReadOnlyList<string> CssClasses => _cssClasses;
         public int ChildrenCount => _children.Count;
+        private IElementState _state = new VisibleState();
+
+        public string CurrentState => _state.Name;
 
         public LightElementNode(string tagName, DisplayType displayType, ClosingType closingType)
         {
@@ -209,15 +212,30 @@ namespace LightHTMLDemo
             Console.WriteLine($"Tag name: {TagName}");
             Console.WriteLine($"Display type: {DisplayType}");
             Console.WriteLine($"Closing type: {ClosingType}");
+            Console.WriteLine($"Current state: {CurrentState}");
             Console.WriteLine($"CSS classes: {(CssClasses.Count > 0 ? string.Join(", ", CssClasses) : "none")}");
             Console.WriteLine($"Children count: {ChildrenCount}");
             Console.WriteLine($"InnerHTML: {InnerHTML()}");
             Console.WriteLine($"OuterHTML: {OuterHTML()}");
             Console.WriteLine($"Registered events: {(_eventListeners.Count > 0 ? string.Join(", ", _eventListeners.Keys) : "none")}");
         }
+
         public IReadOnlyList<LightNode> GetChildren()
         {
             return _children.AsReadOnly();
+        }
+        public void SetState(IElementState state)
+        {
+            _state = state;
+
+            Console.WriteLine(
+                $"[State Changed] <{TagName}> -> {_state.Name}"
+            );
+        }
+
+        public void ApplyState()
+        {
+            _state.Handle(this);
         }
     }
 
@@ -317,6 +335,53 @@ namespace LightHTMLDemo
                 var command = _commands.Dequeue();
                 command.Execute();
             }
+        }
+    }
+
+    // =========================================
+    // STATE PATTERN
+    // =========================================
+
+    public interface IElementState
+    {
+        string Name { get; }
+
+        void Handle(LightElementNode element);
+    }
+
+    public class HiddenState : IElementState
+    {
+        public string Name => "Hidden";
+
+        public void Handle(LightElementNode element)
+        {
+            Console.WriteLine(
+                $"[State] <{element.TagName}> is hidden."
+            );
+        }
+    }
+
+    public class VisibleState : IElementState
+    {
+        public string Name => "Visible";
+
+        public void Handle(LightElementNode element)
+        {
+            Console.WriteLine(
+                $"[State] <{element.TagName}> is visible."
+            );
+        }
+    }
+
+    public class DisabledState : IElementState
+    {
+        public string Name => "Disabled";
+
+        public void Handle(LightElementNode element)
+        {
+            Console.WriteLine(
+                $"[State] <{element.TagName}> is disabled."
+            );
         }
     }
     // =========================================
@@ -562,6 +627,30 @@ namespace LightHTMLDemo
                     Console.WriteLine($"Text: {text.Text}");
                 }
             }
+
+            Console.WriteLine();
+            Console.WriteLine("=== STATE DEMO ===");
+
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            image.SetState(new HiddenState());
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            image.SetState(new DisabledState());
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            image.SetState(new VisibleState());
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            Console.WriteLine($"Current image state: {image.CurrentState}");
 
             Console.WriteLine("=== Кінець демонстрації подій ===");
         }
