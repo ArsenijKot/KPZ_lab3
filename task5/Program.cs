@@ -34,6 +34,20 @@ namespace LightHTMLDemo
 
     public abstract class LightNode
     {
+        internal void RaiseCreated() => OnCreated();
+        internal void RaiseInserted(LightElementNode parent) => OnInserted(parent);
+        internal void RaiseRemoved(LightElementNode parent) => OnRemoved(parent);
+        internal void RaiseStylesApplied() => OnStylesApplied();
+        internal void RaiseClassListApplied() => OnClassListApplied();
+        internal void RaiseTextRendered() => OnTextRendered();
+
+        protected virtual void OnCreated() { }
+        protected virtual void OnInserted(LightElementNode parent) { }
+        protected virtual void OnRemoved(LightElementNode parent) { }
+        protected virtual void OnStylesApplied() { }
+        protected virtual void OnClassListApplied() { }
+        protected virtual void OnTextRendered() { }
+
         public abstract string OuterHTML();
         public abstract string InnerHTML();
         public abstract void Print(int indent = 0);
@@ -46,20 +60,34 @@ namespace LightHTMLDemo
         public LightTextNode(string text)
         {
             Text = text;
+            RaiseCreated();
+        }
+
+        protected override void OnCreated()
+        {
+            Console.WriteLine($"[Lifecycle] Text node created: \"{Text}\"");
+        }
+
+        protected override void OnTextRendered()
+        {
+            Console.WriteLine($"[Lifecycle] Text node rendered: \"{Text}\"");
         }
 
         public override string OuterHTML()
         {
+            RaiseTextRendered();
             return Text;
         }
 
         public override string InnerHTML()
         {
+            RaiseTextRendered();
             return Text;
         }
 
         public override void Print(int indent = 0)
         {
+            RaiseTextRendered();
             Console.WriteLine($"{new string(' ', indent)}{Text}");
         }
     }
@@ -87,11 +115,30 @@ namespace LightHTMLDemo
             TagName = tagName;
             DisplayType = displayType;
             ClosingType = closingType;
+
+            RaiseCreated();
         }
 
         public void AddChild(LightNode child)
         {
+            if (child == null) return;
+
             _children.Add(child);
+            child.RaiseInserted(this);
+        }
+
+        public bool RemoveChild(LightNode child)
+        {
+            if (child == null) return false;
+
+            bool removed = _children.Remove(child);
+
+            if (removed)
+            {
+                child.RaiseRemoved(this);
+            }
+
+            return removed;
         }
 
         public void AddCssClass(string className)
@@ -99,7 +146,34 @@ namespace LightHTMLDemo
             if (!string.IsNullOrWhiteSpace(className))
             {
                 _cssClasses.Add(className);
+                RaiseClassListApplied();
+                RaiseStylesApplied();
             }
+        }
+
+        protected override void OnCreated()
+        {
+            Console.WriteLine($"[Lifecycle] Element created: <{TagName}>");
+        }
+
+        protected override void OnInserted(LightElementNode parent)
+        {
+            Console.WriteLine($"[Lifecycle] <{TagName}> inserted into <{parent.TagName}>");
+        }
+
+        protected override void OnRemoved(LightElementNode parent)
+        {
+            Console.WriteLine($"[Lifecycle] <{TagName}> removed from <{parent.TagName}>");
+        }
+
+        protected override void OnStylesApplied()
+        {
+            Console.WriteLine($"[Lifecycle] Styles applied to <{TagName}>");
+        }
+
+        protected override void OnClassListApplied()
+        {
+            Console.WriteLine($"[Lifecycle] Class list updated for <{TagName}>");
         }
 
         public void AddEventListener(string eventName, Action<LightEvent> handler)
@@ -550,6 +624,17 @@ namespace LightHTMLDemo
             page.Print();
 
             Console.WriteLine();
+            Console.WriteLine("=== Lifecycle hooks demo ===");
+
+            page.AddCssClass("app-shell");
+
+            var tempBlock = new LightElementNode("p", DisplayType.Block, ClosingType.WithClosingTag);
+            tempBlock.AddChild(new LightTextNode("Temporary node for lifecycle demo"));
+
+            page.AddChild(tempBlock);
+            page.RemoveChild(tempBlock);
+            Console.WriteLine();
+
             Console.WriteLine("=== Root element info ===");
             page.ShowInfo();
 
