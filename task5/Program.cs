@@ -48,6 +48,8 @@ namespace LightHTMLDemo
         protected virtual void OnClassListApplied() { }
         protected virtual void OnTextRendered() { }
 
+        public abstract void Accept(ILightNodeVisitor visitor);
+
         public abstract string OuterHTML();
         public abstract string InnerHTML();
         public abstract void Print(int indent = 0);
@@ -71,6 +73,11 @@ namespace LightHTMLDemo
         protected override void OnTextRendered()
         {
             Console.WriteLine($"[Lifecycle] Text node rendered: \"{Text}\"");
+        }
+
+        public override void Accept(ILightNodeVisitor visitor)
+        {
+            visitor.VisitText(this);
         }
 
         public override string OuterHTML()
@@ -100,15 +107,20 @@ namespace LightHTMLDemo
         private readonly Dictionary<string, List<Action<LightEvent>>> _eventListeners
             = new Dictionary<string, List<Action<LightEvent>>>(StringComparer.OrdinalIgnoreCase);
 
+        private IElementState _state = new VisibleState();
+
         public string TagName { get; }
         public DisplayType DisplayType { get; }
         public ClosingType ClosingType { get; }
 
+        public string CurrentState => _state.Name;
         public IReadOnlyList<string> CssClasses => _cssClasses;
         public int ChildrenCount => _children.Count;
-        private IElementState _state = new VisibleState();
 
-        public string CurrentState => _state.Name;
+        public IReadOnlyList<LightNode> GetChildren()
+        {
+            return _children.AsReadOnly();
+        }
 
         public LightElementNode(string tagName, DisplayType displayType, ClosingType closingType)
         {
@@ -151,29 +163,15 @@ namespace LightHTMLDemo
             }
         }
 
-        protected override void OnCreated()
+        public void SetState(IElementState state)
         {
-            Console.WriteLine($"[Lifecycle] Element created: <{TagName}>");
+            _state = state;
+            Console.WriteLine($"[State Changed] <{TagName}> -> {_state.Name}");
         }
 
-        protected override void OnInserted(LightElementNode parent)
+        public void ApplyState()
         {
-            Console.WriteLine($"[Lifecycle] <{TagName}> inserted into <{parent.TagName}>");
-        }
-
-        protected override void OnRemoved(LightElementNode parent)
-        {
-            Console.WriteLine($"[Lifecycle] <{TagName}> removed from <{parent.TagName}>");
-        }
-
-        protected override void OnStylesApplied()
-        {
-            Console.WriteLine($"[Lifecycle] Styles applied to <{TagName}>");
-        }
-
-        protected override void OnClassListApplied()
-        {
-            Console.WriteLine($"[Lifecycle] Class list updated for <{TagName}>");
+            _state.Handle(this);
         }
 
         public void AddEventListener(string eventName, Action<LightEvent> handler)
@@ -226,6 +224,41 @@ namespace LightHTMLDemo
                     }
                 }
             }
+        }
+
+        public override void Accept(ILightNodeVisitor visitor)
+        {
+            visitor.VisitElement(this);
+
+            foreach (var child in _children)
+            {
+                child.Accept(visitor);
+            }
+        }
+
+        protected override void OnCreated()
+        {
+            Console.WriteLine($"[Lifecycle] Element created: <{TagName}>");
+        }
+
+        protected override void OnInserted(LightElementNode parent)
+        {
+            Console.WriteLine($"[Lifecycle] <{TagName}> inserted into <{parent.TagName}>");
+        }
+
+        protected override void OnRemoved(LightElementNode parent)
+        {
+            Console.WriteLine($"[Lifecycle] <{TagName}> removed from <{parent.TagName}>");
+        }
+
+        protected override void OnStylesApplied()
+        {
+            Console.WriteLine($"[Lifecycle] Styles applied to <{TagName}>");
+        }
+
+        protected override void OnClassListApplied()
+        {
+            Console.WriteLine($"[Lifecycle] Class list updated for <{TagName}>");
         }
 
         public override string OuterHTML()
@@ -293,25 +326,60 @@ namespace LightHTMLDemo
             Console.WriteLine($"OuterHTML: {OuterHTML()}");
             Console.WriteLine($"Registered events: {(_eventListeners.Count > 0 ? string.Join(", ", _eventListeners.Keys) : "none")}");
         }
+    }
 
-        public IReadOnlyList<LightNode> GetChildren()
+    public class HtmlStatisticsVisitor : ILightNodeVisitor
+    {
+        public int ElementCount { get; private set; }
+        public int TextCount { get; private set; }
+        public int TotalTextLength { get; private set; }
+
+        public List<string> Tags { get; } = new List<string>();
+
+        public void VisitElement(LightElementNode element)
         {
-            return _children.AsReadOnly();
+            ElementCount++;
+            Tags.Add(element.TagName);
         }
-        public void SetState(IElementState state)
-        {
-            _state = state;
 
-            Console.WriteLine(
-                $"[State Changed] <{TagName}> -> {_state.Name}"
-            );
+        public void VisitText(LightTextNode textNode)
+        {
+            TextCount++;
+            TotalTextLength += textNode.Text.Length;
         }
 
-        public void ApplyState()
+        public void ShowReport()
         {
-            _state.Handle(this);
+            Console.WriteLine("=== Visitor report ===");
+            Console.WriteLine($"Elements: {ElementCount}");
+            Console.WriteLine($"Text nodes: {TextCount}");
+            Console.WriteLine($"Total text length: {TotalTextLength}");
+            Console.WriteLine($"Tags: {(Tags.Count > 0 ? string.Join(", ", Tags) : "none")}");
         }
     }
+
+    public class HtmlTextCollectorVisitor : ILightNodeVisitor
+    {
+        private readonly StringBuilder _sb = new StringBuilder();
+
+        public void VisitElement(LightElementNode element)
+        {
+        }
+
+        public void VisitText(LightTextNode textNode)
+        {
+            if (!string.IsNullOrWhiteSpace(textNode.Text))
+            {
+                _sb.AppendLine(textNode.Text);
+            }
+        }
+
+        public string GetText()
+        {
+            return _sb.ToString().TrimEnd();
+        }
+    }
+
 
     // =========================================
     // COMMAND PATTERN
@@ -458,6 +526,13 @@ namespace LightHTMLDemo
             );
         }
     }
+
+    public interface ILightNodeVisitor
+    {
+        void VisitElement(LightElementNode element);
+        void VisitText(LightTextNode textNode);
+    }
+
     // =========================================
     // ITERATOR
     // =========================================
@@ -737,6 +812,20 @@ namespace LightHTMLDemo
 
             Console.WriteLine($"Current image state: {image.CurrentState}");
 
+            Console.WriteLine();
+            Console.WriteLine("=== VISITOR DEMO ===");
+
+            var statsVisitor = new HtmlStatisticsVisitor();
+            page.Accept(statsVisitor);
+            statsVisitor.ShowReport();
+
+            Console.WriteLine();
+
+            var textVisitor = new HtmlTextCollectorVisitor();
+            page.Accept(textVisitor);
+            Console.WriteLine("=== Collected text ===");
+            Console.WriteLine(textVisitor.GetText());
+            Console.WriteLine();
             Console.WriteLine("=== Кінець демонстрації подій ===");
         }
     }
