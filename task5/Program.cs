@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Collections;
 
 namespace LightHTMLDemo
 {
@@ -214,6 +215,107 @@ namespace LightHTMLDemo
             Console.WriteLine($"OuterHTML: {OuterHTML()}");
             Console.WriteLine($"Registered events: {(_eventListeners.Count > 0 ? string.Join(", ", _eventListeners.Keys) : "none")}");
         }
+        public IReadOnlyList<LightNode> GetChildren()
+        {
+            return _children.AsReadOnly();
+        }
+    }
+
+    // =========================================
+    // ITERATOR
+    // =========================================
+
+    public interface ILightNodeIterator
+    {
+        bool HasNext();
+        LightNode Next();
+    }
+
+    // =========================================
+    // DEPTH-FIRST ITERATOR (DFS)
+    // =========================================
+
+    public class DepthFirstIterator : ILightNodeIterator
+    {
+        private readonly Stack<LightNode> _stack = new Stack<LightNode>();
+
+        public DepthFirstIterator(LightNode root)
+        {
+            _stack.Push(root);
+        }
+
+        public bool HasNext()
+        {
+            return _stack.Count > 0;
+        }
+
+        public LightNode Next()
+        {
+            if (!HasNext())
+            {
+                throw new InvalidOperationException("No more elements.");
+            }
+
+            var current = _stack.Pop();
+
+            if (current is LightElementNode element)
+            {
+                var childrenField = typeof(LightElementNode)
+                    .GetField("_children",
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Instance);
+
+                var children = (List<LightNode>)childrenField.GetValue(element);
+
+                for (int i = children.Count - 1; i >= 0; i--)
+                {
+                    _stack.Push(children[i]);
+                }
+            }
+
+            return current;
+        }
+    }
+
+    // =========================================
+    // BREADTH-FIRST ITERATOR (BFS)
+    // =========================================
+
+    public class BreadthFirstIterator : ILightNodeIterator
+    {
+        private readonly Queue<LightNode> _queue = new Queue<LightNode>();
+
+        public BreadthFirstIterator(LightNode root)
+        {
+            _queue.Enqueue(root);
+        }
+
+        public bool HasNext()
+        {
+            return _queue.Count > 0;
+        }
+
+        public LightNode Next()
+        {
+            if (!HasNext())
+            {
+                throw new InvalidOperationException("No more elements.");
+            }
+
+            var current = _queue.Dequeue();
+
+            if (current is LightElementNode element)
+            {
+                var children = element.GetChildren();
+
+                foreach (var child in children)
+                {
+                    _queue.Enqueue(child);
+                }
+            }
+
+            return current;
+        }
     }
 
     class Program
@@ -300,6 +402,45 @@ namespace LightHTMLDemo
             image.DispatchEvent("click", new { href = "/", timestamp = DateTime.UtcNow });
 
             Console.WriteLine();
+
+            Console.WriteLine();
+            Console.WriteLine("=== DFS traversal (Depth-First) ===");
+
+            ILightNodeIterator dfsIterator = new DepthFirstIterator(page);
+
+            while (dfsIterator.HasNext())
+            {
+                var node = dfsIterator.Next();
+
+                if (node is LightElementNode element)
+                {
+                    Console.WriteLine($"Element: <{element.TagName}>");
+                }
+                else if (node is LightTextNode text)
+                {
+                    Console.WriteLine($"Text: {text.Text}");
+                }
+            }
+
+            Console.WriteLine();
+
+            Console.WriteLine("=== BFS traversal (Breadth-First) ===");
+
+            ILightNodeIterator bfsIterator = new BreadthFirstIterator(page);
+
+            while (bfsIterator.HasNext())
+            {
+                var node = bfsIterator.Next();
+
+                if (node is LightElementNode element)
+                {
+                    Console.WriteLine($"Element: <{element.TagName}>");
+                }
+                else if (node is LightTextNode text)
+                {
+                    Console.WriteLine($"Text: {text.Text}");
+                }
+            }
 
             Console.WriteLine("=== Кінець демонстрації подій ===");
         }
