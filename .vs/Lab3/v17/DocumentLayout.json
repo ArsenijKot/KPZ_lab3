@@ -38,7 +38,7 @@
             },
             {
               "$type": "Bookmark",
-              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
             },
             {
               "$type": "Document",
@@ -50,8 +50,7 @@
               "RelativeToolTip": "task6\\Program.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABEAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-19T10:05:45.585Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-03-19T10:05:45.585Z"
             },
             {
               "$type": "Document",
@@ -61,7 +60,7 @@
               "RelativeDocumentMoniker": "task5\\Program.cs",
               "ToolTip": "C:\\Users\\ADMIN\\source\\repos\\Lab3\\task5\\Program.cs",
               "RelativeToolTip": "task5\\Program.cs",
-              "ViewState": "AgIAAMEAAAAAAAAAAAAAAMEAAAABAAAAAAAAAA==",
+              "ViewState": "AgIAAIkBAAAAAAAAAAAswJYBAAAPAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-03-19T10:01:51.614Z",
               "EditorCaption": ""
@@ -76,8 +75,7 @@
               "RelativeToolTip": "task4\\Program.cs",
               "ViewState": "AgIAAAoAAAAAAAAAAAAqwBEAAAAMAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-19T09:55:50.117Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-03-19T09:55:50.117Z"
             },
             {
               "$type": "Document",
@@ -89,8 +87,7 @@
               "RelativeToolTip": "Task3\\Program.cs",
               "ViewState": "AgIAAEIAAAAAAAAAAAAuwEgAAAAFAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-19T09:52:52.482Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-03-19T09:52:52.482Z"
             }
           ]
         }
