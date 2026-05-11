@@ -222,6 +222,104 @@ namespace LightHTMLDemo
     }
 
     // =========================================
+    // COMMAND PATTERN
+    // =========================================
+
+    public interface ICommand
+    {
+        void Execute();
+    }
+
+    public class AddChildCommand : ICommand
+    {
+        private readonly LightElementNode _parent;
+        private readonly LightNode _child;
+
+        public AddChildCommand(LightElementNode parent, LightNode child)
+        {
+            _parent = parent;
+            _child = child;
+        }
+
+        public void Execute()
+        {
+            _parent.AddChild(_child);
+
+            Console.WriteLine(
+                $"[Command] Child added to <{_parent.TagName}>"
+            );
+        }
+    }
+
+    public class AddCssClassCommand : ICommand
+    {
+        private readonly LightElementNode _element;
+        private readonly string _className;
+
+        public AddCssClassCommand(
+            LightElementNode element,
+            string className)
+        {
+            _element = element;
+            _className = className;
+        }
+
+        public void Execute()
+        {
+            _element.AddCssClass(_className);
+
+            Console.WriteLine(
+                $"[Command] CSS class '{_className}' added to <{_element.TagName}>"
+            );
+        }
+    }
+
+    public class DispatchEventCommand : ICommand
+    {
+        private readonly LightElementNode _element;
+        private readonly string _eventName;
+        private readonly object? _data;
+
+        public DispatchEventCommand(
+            LightElementNode element,
+            string eventName,
+            object? data = null)
+        {
+            _element = element;
+            _eventName = eventName;
+            _data = data;
+        }
+
+        public void Execute()
+        {
+            Console.WriteLine(
+                $"[Command] Dispatching '{_eventName}' on <{_element.TagName}>"
+            );
+
+            _element.DispatchEvent(_eventName, _data);
+        }
+    }
+
+    public class CommandInvoker
+    {
+        private readonly Queue<ICommand> _commands
+            = new Queue<ICommand>();
+
+        public void AddCommand(ICommand command)
+        {
+            _commands.Enqueue(command);
+        }
+
+        public void ExecuteAll()
+        {
+            while (_commands.Count > 0)
+            {
+                var command = _commands.Dequeue();
+                command.Execute();
+            }
+        }
+    }
+    // =========================================
     // ITERATOR
     // =========================================
 
@@ -343,16 +441,25 @@ namespace LightHTMLDemo
             var item3 = new LightElementNode("li", DisplayType.Block, ClosingType.WithClosingTag);
             item3.AddChild(new LightTextNode("Contacts"));
 
-            list.AddChild(item1);
-            list.AddChild(item2);
-            list.AddChild(item3);
+            var invoker = new CommandInvoker();
 
-            var image = new LightElementNode("img", DisplayType.Inline, ClosingType.SelfClosing);
-            image.AddCssClass("logo");
+            invoker.AddCommand(new AddChildCommand(list, item1));
+            invoker.AddCommand(new AddChildCommand(list, item2));
+            invoker.AddCommand(new AddChildCommand(list, item3));
 
-            page.AddChild(title);
-            page.AddChild(list);
-            page.AddChild(image);
+            var image = new LightElementNode(
+                "img",
+                DisplayType.Inline,
+                ClosingType.SelfClosing
+            );
+
+            invoker.AddCommand(new AddCssClassCommand(image, "logo"));
+
+            invoker.AddCommand(new AddChildCommand(page, title));
+            invoker.AddCommand(new AddChildCommand(page, list));
+            invoker.AddCommand(new AddChildCommand(page, image));
+
+            invoker.ExecuteAll();
 
             item1.AddEventListener("click", evt =>
             {
@@ -388,18 +495,32 @@ namespace LightHTMLDemo
             Console.WriteLine();
             Console.WriteLine("=== Симуляція подій ===");
 
-            Console.WriteLine("-- Клік по першому пункту меню --");
-            item1.DispatchEvent("click");
+            var clickCommand = new DispatchEventCommand(item1, "click");
+
+            var mouseOverCommand = new DispatchEventCommand(
+                list,
+                "mouseover"
+            );
+
+            var imageClickCommand = new DispatchEventCommand(
+                image,
+                "click",
+                new
+                {
+                    href = "/",
+                    timestamp = DateTime.UtcNow
+                }
+            );
+
+            clickCommand.Execute();
 
             Console.WriteLine();
 
-            Console.WriteLine("-- Mouseover на списку --");
-            list.DispatchEvent("mouseover");
+            mouseOverCommand.Execute();
 
             Console.WriteLine();
 
-            Console.WriteLine("-- Клік по логотипу з додатковими даними --");
-            image.DispatchEvent("click", new { href = "/", timestamp = DateTime.UtcNow });
+            imageClickCommand.Execute();
 
             Console.WriteLine();
 
