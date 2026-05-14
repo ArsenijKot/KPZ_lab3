@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Collections;
 
 namespace LightHTMLDemo
 {
@@ -23,7 +24,10 @@ namespace LightHTMLDemo
         public LightElementNode Target { get; }
         public object? Data { get; }
 
-        public LightEvent(string type, LightElementNode target, object? data = null)
+        public LightEvent(
+            string type,
+            LightElementNode target,
+            object? data = null)
         {
             Type = type;
             Target = target;
@@ -33,6 +37,22 @@ namespace LightHTMLDemo
 
     public abstract class LightNode
     {
+        internal void RaiseCreated() => OnCreated();
+        internal void RaiseInserted(LightElementNode parent) => OnInserted(parent);
+        internal void RaiseRemoved(LightElementNode parent) => OnRemoved(parent);
+        internal void RaiseStylesApplied() => OnStylesApplied();
+        internal void RaiseClassListApplied() => OnClassListApplied();
+        internal void RaiseTextRendered() => OnTextRendered();
+
+        protected virtual void OnCreated() { }
+        protected virtual void OnInserted(LightElementNode parent) { }
+        protected virtual void OnRemoved(LightElementNode parent) { }
+        protected virtual void OnStylesApplied() { }
+        protected virtual void OnClassListApplied() { }
+        protected virtual void OnTextRendered() { }
+
+        public abstract void Accept(ILightNodeVisitor visitor);
+
         public abstract string OuterHTML();
         public abstract string InnerHTML();
         public abstract void Print(int indent = 0);
@@ -45,49 +65,114 @@ namespace LightHTMLDemo
         public LightTextNode(string text)
         {
             Text = text;
+            RaiseCreated();
+        }
+
+        protected override void OnCreated()
+        {
+            Console.WriteLine($"[Lifecycle] Text node created: \"{Text}\"");
+        }
+
+        protected override void OnTextRendered()
+        {
+            Console.WriteLine($"[Lifecycle] Text node rendered: \"{Text}\"");
+        }
+
+        public override void Accept(ILightNodeVisitor visitor)
+        {
+            visitor.VisitText(this);
         }
 
         public override string OuterHTML()
         {
+            RaiseTextRendered();
             return Text;
         }
 
         public override string InnerHTML()
         {
+            RaiseTextRendered();
             return Text;
         }
 
         public override void Print(int indent = 0)
         {
-            Console.WriteLine($"{new string(' ', indent)}{Text}");
+            RaiseTextRendered();
+
+            Console.WriteLine(
+                $"{new string(' ', indent)}{Text}"
+            );
         }
     }
 
     public class LightElementNode : LightNode
     {
-        private readonly List<LightNode> _children = new List<LightNode>();
-        private readonly List<string> _cssClasses = new List<string>();
+        private readonly List<LightNode> _children =
+            new List<LightNode>();
 
-        private readonly Dictionary<string, List<Action<LightEvent>>> _eventListeners
-            = new Dictionary<string, List<Action<LightEvent>>>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _cssClasses =
+            new List<string>();
+
+
+        private readonly Dictionary<string,
+            List<Action<LightEvent>>> _eventListeners =
+            new Dictionary<string,
+                List<Action<LightEvent>>>(
+                    StringComparer.OrdinalIgnoreCase);
+
+        private IElementState _state = new VisibleState();
 
         public string TagName { get; }
+
         public DisplayType DisplayType { get; }
+
         public ClosingType ClosingType { get; }
 
+        public string CurrentState => _state.Name;
+
         public IReadOnlyList<string> CssClasses => _cssClasses;
+
         public int ChildrenCount => _children.Count;
 
-        public LightElementNode(string tagName, DisplayType displayType, ClosingType closingType)
+        public IReadOnlyList<LightNode> GetChildren()
+        {
+            return _children.AsReadOnly();
+        }
+
+        public LightElementNode(
+            string tagName,
+            DisplayType displayType,
+            ClosingType closingType)
         {
             TagName = tagName;
             DisplayType = displayType;
             ClosingType = closingType;
+
+            RaiseCreated();
         }
+
 
         public void AddChild(LightNode child)
         {
+            if (child == null) return;
+
             _children.Add(child);
+
+            child.RaiseInserted(this);
+        }
+
+        public bool RemoveChild(LightNode child)
+        {
+            if (child == null) return false;
+
+            bool removed = _children.Remove(child);
+
+            if (removed)
+            {
+                child.RaiseRemoved(this);
+            }
+
+            return removed;
         }
 
         public void AddCssClass(string className)
@@ -95,73 +180,170 @@ namespace LightHTMLDemo
             if (!string.IsNullOrWhiteSpace(className))
             {
                 _cssClasses.Add(className);
+
+                RaiseClassListApplied();
+                RaiseStylesApplied();
             }
         }
 
-        public void AddEventListener(string eventName, Action<LightEvent> handler)
+        public void SetState(IElementState state)
         {
-            if (string.IsNullOrWhiteSpace(eventName) || handler == null) return;
+            _state = state;
 
-            if (!_eventListeners.TryGetValue(eventName, out var list))
-            {
-                list = new List<Action<LightEvent>>();
-                _eventListeners[eventName] = list;
-            }
-
-            list.Add(handler);
+            Console.WriteLine(
+                $"[State Changed] <{TagName}> -> {_state.Name}"
+            );
         }
 
-        public bool RemoveEventListener(string eventName, Action<LightEvent> handler)
+        public void ApplyState()
         {
-            if (string.IsNullOrWhiteSpace(eventName) || handler == null) return false;
+            _state.Handle(this);
+        }
 
-            if (_eventListeners.TryGetValue(eventName, out var list))
+        public void AddEventListener(
+            string eventName,
+            Action<LightEvent> handler)
+        {
+            if (string.IsNullOrWhiteSpace(eventName)
+                || handler == null)
             {
-                var removed = list.Remove(handler);
-                if (list.Count == 0)
+                return;
+            }
+
+            if (!_eventListeners.TryGetValue(
+                eventName,
+                out var handlers))
+            {
+                handlers = new List<Action<LightEvent>>();
+
+                _eventListeners[eventName] = handlers;
+            }
+
+            handlers.Add(handler);
+        }
+
+        public bool RemoveEventListener(
+            string eventName,
+            Action<LightEvent> handler)
+        {
+            if (string.IsNullOrWhiteSpace(eventName)
+                || handler == null)
+            {
+                return false;
+            }
+
+            if (_eventListeners.TryGetValue(
+                eventName,
+                out var handlers))
+            {
+                bool removed = handlers.Remove(handler);
+
+                if (handlers.Count == 0)
                 {
                     _eventListeners.Remove(eventName);
                 }
+
                 return removed;
             }
+
             return false;
         }
 
-        public void DispatchEvent(string eventName, object? data = null)
+        public void DispatchEvent(
+            string eventName,
+            object? data = null)
         {
-            if (string.IsNullOrWhiteSpace(eventName)) return;
-
-            var evt = new LightEvent(eventName, this, data);
-
-            if (_eventListeners.TryGetValue(eventName, out var list))
+            if (string.IsNullOrWhiteSpace(eventName))
             {
-                var handlers = list.ToArray();
-                foreach (var h in handlers)
+                return;
+            }
+
+            var evt = new LightEvent(
+                eventName,
+                this,
+                data);
+
+            if (_eventListeners.TryGetValue(
+                eventName,
+                out var handlers))
+            {
+                foreach (var handler in handlers.ToArray())
                 {
                     try
                     {
-                        h.Invoke(evt);
+                        handler.Invoke(evt);
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Event handler error] {ex.Message}");
+                        Console.WriteLine(
+                            $"[Event handler error] {ex.Message}"
+                        );
                     }
                 }
             }
+        }
+
+        public override void Accept(ILightNodeVisitor visitor)
+        {
+            visitor.VisitElement(this);
+
+            foreach (var child in _children)
+            {
+                child.Accept(visitor);
+            }
+        }
+
+        protected override void OnCreated()
+        {
+            Console.WriteLine(
+                $"[Lifecycle] Element created: <{TagName}>"
+            );
+        }
+
+        protected override void OnInserted(LightElementNode parent)
+        {
+            Console.WriteLine(
+                $"[Lifecycle] <{TagName}> inserted into <{parent.TagName}>"
+            );
+        }
+
+        protected override void OnRemoved(LightElementNode parent)
+        {
+            Console.WriteLine(
+                $"[Lifecycle] <{TagName}> removed from <{parent.TagName}>"
+            );
+        }
+
+        protected override void OnStylesApplied()
+        {
+            Console.WriteLine(
+                $"[Lifecycle] Styles applied to <{TagName}>"
+            );
+        }
+
+        protected override void OnClassListApplied()
+        {
+            Console.WriteLine(
+                $"[Lifecycle] Class list updated for <{TagName}>"
+            );
         }
 
         public override string OuterHTML()
         {
-            string classAttr = _cssClasses.Count > 0
-                ? $" class=\"{string.Join(" ", _cssClasses)}\""
-                : string.Empty;
+            string classAttr =
+                _cssClasses.Count > 0
+                    ? $" class=\"{string.Join(" ", _cssClasses)}\""
+                    : string.Empty;
 
             if (ClosingType == ClosingType.SelfClosing)
             {
                 return $"<{TagName}{classAttr} />";
             }
 
-            return $"<{TagName}{classAttr}>{InnerHTML()}</{TagName}>";
+            return
+                $"<{TagName}{classAttr}>"
+                + $"{InnerHTML()}"
+                + $"</{TagName}>";
         }
 
         public override string InnerHTML()
@@ -186,7 +368,9 @@ namespace LightHTMLDemo
                 return;
             }
 
-            Console.WriteLine($"{spaces}<{TagName}{GetClassAttribute()}>");
+            Console.WriteLine(
+                $"{spaces}<{TagName}{GetClassAttribute()}>"
+            );
 
             foreach (var child in _children)
             {
@@ -208,11 +392,323 @@ namespace LightHTMLDemo
             Console.WriteLine($"Tag name: {TagName}");
             Console.WriteLine($"Display type: {DisplayType}");
             Console.WriteLine($"Closing type: {ClosingType}");
-            Console.WriteLine($"CSS classes: {(CssClasses.Count > 0 ? string.Join(", ", CssClasses) : "none")}");
+            Console.WriteLine($"Current state: {CurrentState}");
+
+            Console.WriteLine(
+                $"CSS classes: {(CssClasses.Count > 0 ? string.Join(", ", CssClasses) : "none")}"
+            );
+
             Console.WriteLine($"Children count: {ChildrenCount}");
+
             Console.WriteLine($"InnerHTML: {InnerHTML()}");
             Console.WriteLine($"OuterHTML: {OuterHTML()}");
-            Console.WriteLine($"Registered events: {(_eventListeners.Count > 0 ? string.Join(", ", _eventListeners.Keys) : "none")}");
+
+            Console.WriteLine(
+                $"Registered events: {(_eventListeners.Count > 0 ? string.Join(", ", _eventListeners.Keys) : "none")}"
+            );
+        }
+    }
+
+    public class HtmlStatisticsVisitor : ILightNodeVisitor
+    {
+        public int ElementCount { get; private set; }
+
+        public int TextCount { get; private set; }
+
+        public int TotalTextLength { get; private set; }
+
+        public List<string> Tags { get; } =
+            new List<string>();
+
+        public void VisitElement(LightElementNode element)
+        {
+            ElementCount++;
+            Tags.Add(element.TagName);
+        }
+
+        public void VisitText(LightTextNode textNode)
+        {
+            TextCount++;
+            TotalTextLength += textNode.Text.Length;
+        }
+
+        public void ShowReport()
+        {
+            Console.WriteLine("=== Visitor report ===");
+
+            Console.WriteLine($"Elements: {ElementCount}");
+            Console.WriteLine($"Text nodes: {TextCount}");
+            Console.WriteLine($"Total text length: {TotalTextLength}");
+
+            Console.WriteLine(
+                $"Tags: {(Tags.Count > 0 ? string.Join(", ", Tags) : "none")}"
+            );
+        }
+    }
+
+    public class HtmlTextCollectorVisitor : ILightNodeVisitor
+    {
+        private readonly StringBuilder _sb =
+            new StringBuilder();
+
+        public void VisitElement(LightElementNode element)
+        {
+        }
+
+        public void VisitText(LightTextNode textNode)
+        {
+            if (!string.IsNullOrWhiteSpace(textNode.Text))
+            {
+                _sb.AppendLine(textNode.Text);
+            }
+        }
+
+        public string GetText()
+        {
+            return _sb.ToString().TrimEnd();
+        }
+    }
+
+    public interface ICommand
+    {
+        void Execute();
+    }
+
+    public class AddChildCommand : ICommand
+    {
+        private readonly LightElementNode _parent;
+        private readonly LightNode _child;
+
+        public AddChildCommand(
+            LightElementNode parent,
+            LightNode child)
+        {
+            _parent = parent;
+            _child = child;
+        }
+
+        public void Execute()
+        {
+            _parent.AddChild(_child);
+
+            Console.WriteLine(
+                $"[Command] Child added to <{_parent.TagName}>"
+            );
+        }
+    }
+
+    public class AddCssClassCommand : ICommand
+    {
+        private readonly LightElementNode _element;
+        private readonly string _className;
+
+        public AddCssClassCommand(
+            LightElementNode element,
+            string className)
+        {
+            _element = element;
+            _className = className;
+        }
+
+        public void Execute()
+        {
+            _element.AddCssClass(_className);
+
+            Console.WriteLine(
+                $"[Command] CSS class '{_className}' added to <{_element.TagName}>"
+            );
+        }
+    }
+
+    public class DispatchEventCommand : ICommand
+    {
+        private readonly LightElementNode _element;
+        private readonly string _eventName;
+        private readonly object? _data;
+
+        public DispatchEventCommand(
+            LightElementNode element,
+            string eventName,
+            object? data = null)
+        {
+            _element = element;
+            _eventName = eventName;
+            _data = data;
+        }
+
+        public void Execute()
+        {
+            Console.WriteLine(
+                $"[Command] Dispatching '{_eventName}' on <{_element.TagName}>"
+            );
+
+            _element.DispatchEvent(
+                _eventName,
+                _data
+            );
+        }
+    }
+
+    public class CommandInvoker
+    {
+        private readonly Queue<ICommand> _commands =
+            new Queue<ICommand>();
+
+        public void AddCommand(ICommand command)
+        {
+            _commands.Enqueue(command);
+        }
+
+        public void ExecuteAll()
+        {
+            while (_commands.Count > 0)
+            {
+                var command = _commands.Dequeue();
+                command.Execute();
+            }
+        }
+    }
+
+    public interface IElementState
+    {
+        string Name { get; }
+
+        void Handle(LightElementNode element);
+    }
+
+    public class HiddenState : IElementState
+    {
+        public string Name => "Hidden";
+
+        public void Handle(LightElementNode element)
+        {
+            Console.WriteLine(
+                $"[State] <{element.TagName}> is hidden."
+            );
+        }
+    }
+
+    public class VisibleState : IElementState
+    {
+        public string Name => "Visible";
+
+        public void Handle(LightElementNode element)
+        {
+            Console.WriteLine(
+                $"[State] <{element.TagName}> is visible."
+            );
+        }
+    }
+
+    public class DisabledState : IElementState
+    {
+        public string Name => "Disabled";
+
+        public void Handle(LightElementNode element)
+        {
+            Console.WriteLine(
+                $"[State] <{element.TagName}> is disabled."
+            );
+        }
+    }
+
+    public interface ILightNodeVisitor
+    {
+        void VisitElement(LightElementNode element);
+        void VisitText(LightTextNode textNode);
+    }
+
+    public interface ILightNodeIterator
+    {
+        bool HasNext();
+        LightNode Next();
+    }
+
+    public class DepthFirstIterator : ILightNodeIterator
+    {
+        private readonly Stack<LightNode> _stack =
+            new Stack<LightNode>();
+
+        public DepthFirstIterator(LightNode root)
+        {
+            _stack.Push(root);
+        }
+
+        public bool HasNext()
+        {
+            return _stack.Count > 0;
+        }
+
+        public LightNode Next()
+        {
+            if (!HasNext())
+            {
+                throw new InvalidOperationException(
+                    "No more elements."
+                );
+            }
+
+            var current = _stack.Pop();
+
+            if (current is LightElementNode element)
+            {
+                var childrenField =
+                    typeof(LightElementNode)
+                    .GetField(
+                        "_children",
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Instance);
+
+                var children =
+                    (List<LightNode>)childrenField.GetValue(element);
+
+                for (int i = children.Count - 1; i >= 0; i--)
+                {
+                    _stack.Push(children[i]);
+                }
+            }
+
+            return current;
+        }
+    }
+
+    public class BreadthFirstIterator : ILightNodeIterator
+    {
+        private readonly Queue<LightNode> _queue =
+            new Queue<LightNode>();
+
+        public BreadthFirstIterator(LightNode root)
+        {
+            _queue.Enqueue(root);
+        }
+
+        public bool HasNext()
+        {
+            return _queue.Count > 0;
+        }
+
+        public LightNode Next()
+        {
+            if (!HasNext())
+            {
+                throw new InvalidOperationException(
+                    "No more elements."
+                );
+            }
+
+            var current = _queue.Dequeue();
+
+            if (current is LightElementNode element)
+            {
+                var children = element.GetChildren();
+
+                foreach (var child in children)
+                {
+                    _queue.Enqueue(child);
+                }
+            }
+
+            return current;
         }
     }
 
@@ -223,85 +719,281 @@ namespace LightHTMLDemo
             Console.OutputEncoding = Encoding.UTF8;
             Console.InputEncoding = Encoding.UTF8;
 
-            var page = new LightElementNode("div", DisplayType.Block, ClosingType.WithClosingTag);
+            var page = new LightElementNode(
+                "div",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
+
             page.AddCssClass("container");
 
-            var title = new LightElementNode("h1", DisplayType.Block, ClosingType.WithClosingTag);
-            title.AddChild(new LightTextNode("LightHTML Demo"));
+            var title = new LightElementNode(
+                "h1",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
 
-            var list = new LightElementNode("ul", DisplayType.Block, ClosingType.WithClosingTag);
+            title.AddChild(
+                new LightTextNode("LightHTML Demo"));
+
+            var list = new LightElementNode(
+                "ul",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
+
             list.AddCssClass("menu");
 
-            var item1 = new LightElementNode("li", DisplayType.Block, ClosingType.WithClosingTag);
-            item1.AddChild(new LightTextNode("Home"));
+            var item1 = new LightElementNode(
+                "li",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
 
-            var item2 = new LightElementNode("li", DisplayType.Block, ClosingType.WithClosingTag);
-            item2.AddChild(new LightTextNode("About"));
+            item1.AddChild(
+                new LightTextNode("Home"));
 
-            var item3 = new LightElementNode("li", DisplayType.Block, ClosingType.WithClosingTag);
-            item3.AddChild(new LightTextNode("Contacts"));
+            var item2 = new LightElementNode(
+                "li",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
 
-            list.AddChild(item1);
-            list.AddChild(item2);
-            list.AddChild(item3);
+            item2.AddChild(
+                new LightTextNode("About"));
 
-            var image = new LightElementNode("img", DisplayType.Inline, ClosingType.SelfClosing);
-            image.AddCssClass("logo");
+            var item3 = new LightElementNode(
+                "li",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
 
-            page.AddChild(title);
-            page.AddChild(list);
-            page.AddChild(image);
+            item3.AddChild(
+                new LightTextNode("Contacts"));
+
+            var invoker = new CommandInvoker();
+
+            invoker.AddCommand(
+                new AddChildCommand(list, item1));
+
+            invoker.AddCommand(
+                new AddChildCommand(list, item2));
+
+            invoker.AddCommand(
+                new AddChildCommand(list, item3));
+
+            var image = new LightElementNode(
+                "img",
+                DisplayType.Inline,
+                ClosingType.SelfClosing
+            );
+
+            invoker.AddCommand(
+                new AddCssClassCommand(image, "logo"));
+
+            invoker.AddCommand(
+                new AddChildCommand(page, title));
+
+            invoker.AddCommand(
+                new AddChildCommand(page, list));
+
+            invoker.AddCommand(
+                new AddChildCommand(page, image));
+
+            invoker.ExecuteAll();
 
             item1.AddEventListener("click", evt =>
             {
-                Console.WriteLine($"[Event] '{evt.Type}' на елементі <{evt.Target.TagName}> з текстом: '{evt.Target.InnerHTML()}'");
+                Console.WriteLine(
+                    $"[Event] '{evt.Type}' на елементі <{evt.Target.TagName}>"
+                );
             });
 
             item2.AddEventListener("click", evt =>
             {
-                Console.WriteLine($"[Event] '{evt.Type}' на <{evt.Target.TagName}> — відкриваємо сторінку 'About'.");
+                Console.WriteLine(
+                    $"[Event] '{evt.Type}' на <{evt.Target.TagName}> — відкриваємо сторінку About"
+                );
             });
 
             list.AddEventListener("mouseover", evt =>
             {
-                Console.WriteLine($"[Event] '{evt.Type}' на <{evt.Target.TagName}> — підсвічуємо меню.");
+                Console.WriteLine(
+                    $"[Event] '{evt.Type}' на <{evt.Target.TagName}> — підсвічуємо меню"
+                );
             });
 
             image.AddEventListener("click", evt =>
             {
-                Console.WriteLine($"[Event] '{evt.Type}' на <{evt.Target.TagName}> — логотип натиснуто. Дані: {evt.Data ?? "none"}");
+                Console.WriteLine(
+                    $"[Event] '{evt.Type}' на <{evt.Target.TagName}> — логотип натиснуто"
+                );
             });
 
             Console.WriteLine("=== Tree output ===");
+
             page.Print();
 
             Console.WriteLine();
+
+            Console.WriteLine("=== Lifecycle hooks demo ===");
+
+            page.AddCssClass("app-shell");
+
+            var tempBlock = new LightElementNode(
+                "p",
+                DisplayType.Block,
+                ClosingType.WithClosingTag);
+
+            tempBlock.AddChild(
+                new LightTextNode(
+                    "Temporary node for lifecycle demo"));
+
+            page.AddChild(tempBlock);
+
+            page.RemoveChild(tempBlock);
+
+            Console.WriteLine();
+
             Console.WriteLine("=== Root element info ===");
+
             page.ShowInfo();
 
             Console.WriteLine();
+
             Console.WriteLine("=== Full OuterHTML ===");
+
             Console.WriteLine(page.OuterHTML());
 
             Console.WriteLine();
+
             Console.WriteLine("=== Симуляція подій ===");
 
-            Console.WriteLine("-- Клік по першому пункту меню --");
-            item1.DispatchEvent("click");
+            var clickCommand =
+                new DispatchEventCommand(
+                    item1,
+                    "click");
+
+            var mouseOverCommand =
+                new DispatchEventCommand(
+                    list,
+                    "mouseover");
+
+            var imageClickCommand =
+                new DispatchEventCommand(
+                    image,
+                    "click",
+                    new
+                    {
+                        href = "/",
+                        timestamp = DateTime.UtcNow
+                    });
+
+            clickCommand.Execute();
 
             Console.WriteLine();
 
-            Console.WriteLine("-- Mouseover на списку --");
-            list.DispatchEvent("mouseover");
+            mouseOverCommand.Execute();
 
             Console.WriteLine();
 
-            Console.WriteLine("-- Клік по логотипу з додатковими даними --");
-            image.DispatchEvent("click", new { href = "/", timestamp = DateTime.UtcNow });
+            imageClickCommand.Execute();
 
             Console.WriteLine();
 
-            Console.WriteLine("=== Кінець демонстрації подій ===");
+            Console.WriteLine("=== DFS traversal ===");
+
+            ILightNodeIterator dfsIterator =
+                new DepthFirstIterator(page);
+
+            while (dfsIterator.HasNext())
+            {
+                var node = dfsIterator.Next();
+
+                if (node is LightElementNode element)
+                {
+                    Console.WriteLine(
+                        $"Element: <{element.TagName}>");
+                }
+                else if (node is LightTextNode text)
+                {
+                    Console.WriteLine(
+                        $"Text: {text.Text}");
+                }
+            }
+
+            Console.WriteLine();
+
+            Console.WriteLine("=== BFS traversal ===");
+
+            ILightNodeIterator bfsIterator =
+                new BreadthFirstIterator(page);
+
+            while (bfsIterator.HasNext())
+            {
+                var node = bfsIterator.Next();
+
+                if (node is LightElementNode element)
+                {
+                    Console.WriteLine(
+                        $"Element: <{element.TagName}>");
+                }
+                else if (node is LightTextNode text)
+                {
+                    Console.WriteLine(
+                        $"Text: {text.Text}");
+                }
+            }
+
+            Console.WriteLine();
+
+            Console.WriteLine("=== STATE DEMO ===");
+
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            image.SetState(new HiddenState());
+
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            image.SetState(new DisabledState());
+
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            image.SetState(new VisibleState());
+
+            image.ApplyState();
+
+            Console.WriteLine();
+
+            Console.WriteLine(
+                $"Current image state: {image.CurrentState}");
+
+            Console.WriteLine();
+
+            Console.WriteLine("=== VISITOR DEMO ===");
+
+            var statsVisitor =
+                new HtmlStatisticsVisitor();
+
+            page.Accept(statsVisitor);
+
+            statsVisitor.ShowReport();
+
+            Console.WriteLine();
+
+            var textVisitor =
+                new HtmlTextCollectorVisitor();
+
+            page.Accept(textVisitor);
+
+            Console.WriteLine("=== Collected text ===");
+
+            Console.WriteLine(textVisitor.GetText());
+
+            Console.WriteLine();
+
+            Console.WriteLine(
+                "=== Кінець демонстрації Observer Pattern ===");
         }
     }
 }
